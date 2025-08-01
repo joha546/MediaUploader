@@ -8,3 +8,4 @@ build/
 *.spec
 database_check.py
 token.json
+email_credentials.json
