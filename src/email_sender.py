@@ -3,31 +3,14 @@ from tkinter import messagebox, simpledialog
 import smtplib
 from email.mime.text import MIMEText
 import re
-import json
-import os
 import dns.resolver
 import logging
+from config import load_email_credentials, is_valid_email
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, filename="media_uploader.log", 
                     format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-# Credentials file
-CREDENTIALS_FILE = "email_credentials.json"
-
-def is_valid_email(email):
-    """
-    Validate email address format.
-    
-    Args:
-        email (str): Email address to validate.
-    
-    Returns:
-        bool: True if format is valid, False otherwise.
-    """
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
 
 def check_mx_records(email):
     """
@@ -50,33 +33,6 @@ def check_mx_records(email):
     except Exception as e:
         logger.error(f"Error checking MX records for {email}: {str(e)}")
         return False
-
-def load_credentials():
-    """
-    Load sender email and app-specific password from email_credentials.json.
-    
-    Returns:
-        tuple: (sender_email, app_password), or (None, None) if error.
-    """
-    try:
-        if not os.path.exists(CREDENTIALS_FILE):
-            logger.error(f"Credentials file not found: {CREDENTIALS_FILE}")
-            return None, None
-        with open(CREDENTIALS_FILE, "r") as f:
-            creds = json.load(f)
-            sender_email = creds.get("sender_email")
-            app_password = creds.get("app_password")
-            if not sender_email or not app_password or not is_valid_email(sender_email):
-                logger.error("Invalid or missing credentials in email_credentials.json")
-                return None, None
-            if not check_mx_records(sender_email):
-                logger.error(f"No MX records for sender email domain: {sender_email}")
-                return None, None
-            logger.info("Loaded email credentials successfully")
-            return sender_email, app_password
-    except Exception as e:
-        logger.error(f"Error loading credentials: {str(e)}")
-        return None, None
 
 def prompt_recipient_email():
     """
@@ -140,11 +96,11 @@ def send_email(uploaded_files, source_folder):
             root.destroy()
             return False, "No files to email"
 
-        # Load sender credentials
-        sender_email, app_password = load_credentials()
+        # Load sender credentials from config
+        sender_email, app_password = load_email_credentials()
         if not sender_email or not app_password:
             logger.warning("Email sending cancelled due to invalid or missing credentials")
-            messagebox.showerror("Error", f"Invalid or missing credentials in {CREDENTIALS_FILE}.")
+            messagebox.showerror("Error", "Invalid or missing credentials in email_credentials.json.")
             root.destroy()
             return False, "Invalid or missing credentials"
 
