@@ -7,3 +7,4 @@ dist/
 build/
 *.spec
 database_check.py
+token.json
