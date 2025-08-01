@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 import re
 import json
 import os
+import dns.resolver
 import logging
 
 # Configure logging
@@ -23,10 +24,32 @@ def is_valid_email(email):
         email (str): Email address to validate.
     
     Returns:
-        bool: True if valid, False otherwise.
+        bool: True if format is valid, False otherwise.
     """
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, email))
+
+def check_mx_records(email):
+    """
+    Check if the email domain has valid MX records.
+    
+    Args:
+        email (str): Email address to check.
+    
+    Returns:
+        bool: True if domain has MX records, False otherwise.
+    """
+    try:
+        domain = email.split('@')[1]
+        dns.resolver.resolve(domain, 'MX')
+        logger.info(f"MX records found for domain: {domain}")
+        return True
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.Timeout) as e:
+        logger.warning(f"No MX records for domain in {email}: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking MX records for {email}: {str(e)}")
+        return False
 
 def load_credentials():
     """
@@ -46,6 +69,9 @@ def load_credentials():
             if not sender_email or not app_password or not is_valid_email(sender_email):
                 logger.error("Invalid or missing credentials in email_credentials.json")
                 return None, None
+            if not check_mx_records(sender_email):
+                logger.error(f"No MX records for sender email domain: {sender_email}")
+                return None, None
             logger.info("Loaded email credentials successfully")
             return sender_email, app_password
     except Exception as e:
@@ -54,7 +80,7 @@ def load_credentials():
 
 def prompt_recipient_email():
     """
-    Prompt user for recipient email using tkinter.
+    Prompt user for recipient email using tkinter and validate format and MX records.
     
     Returns:
         str: Recipient email, or None if cancelled or invalid.
@@ -69,10 +95,20 @@ def prompt_recipient_email():
             root.destroy()
             return None
         if not is_valid_email(recipient_email):
-            logger.warning(f"Invalid recipient email: {recipient_email}")
-            messagebox.showerror("Error", "Invalid recipient email address.")
+            logger.warning(f"Invalid recipient email format: {recipient_email}")
+            messagebox.showerror("Error", "Invalid recipient email address format.")
             root.destroy()
             return None
+        if not check_mx_records(recipient_email):
+            logger.warning(f"No MX records for recipient email domain: {recipient_email}")
+            messagebox.showwarning("Warning", 
+                f"The email domain for {recipient_email} may not exist. The email may not be delivered. Continue anyway?",
+                type=messagebox.YESNO)
+            response = messagebox.askyesno("Confirm", "Send email despite potential delivery issue?")
+            if not response:
+                logger.info("Email sending cancelled due to invalid domain")
+                root.destroy()
+                return None
         root.destroy()
         return recipient_email
     except Exception as e:
@@ -115,7 +151,7 @@ def send_email(uploaded_files, source_folder):
         # Prompt for recipient email
         recipient_email = prompt_recipient_email()
         if not recipient_email:
-            logger.warning("Email sending cancelled due to missing recipient email")
+            logger.warning("Email sending cancelled due to missing or invalid recipient email")
             messagebox.showwarning("Warning", "Email sending cancelled.")
             root.destroy()
             return False, "Email sending cancelled"
@@ -123,10 +159,17 @@ def send_email(uploaded_files, source_folder):
         # Prepare email content
         folder_name = os.path.basename(os.path.normpath(source_folder))
         subject = f"Media Upload: Shareable Links for {folder_name}"
-        body = f"Dear Recipient,\n\nThe following files from {folder_name} have been uploaded to Google Drive:\n\n"
+        body = (
+            f"Dear Recipient,\n\n"
+            f"The following files from {folder_name} have been uploaded to Google Drive:\n\n"
+        )
         for file_name, link in uploaded_files:
             body += f"- {file_name}: {link}\n"
-        body += "\nClick the links to access the files.\n\nBest regards,\nMediaCardUploader"
+        body += (
+            "\nClick the links to access the files.\n\n"
+            "Note: If you cannot receive this email, it may be due to an invalid email address.\n"
+            "Best regards,\nMediaCardUploader"
+        )
 
         msg = MIMEText(body)
         msg['Subject'] = subject
@@ -151,7 +194,8 @@ def send_email(uploaded_files, source_folder):
             for file_name, link in uploaded_files[:3]:
                 message += f"  {file_name}: {link}\n"
             if len(uploaded_files) > 3:
-                message += "..."
+                message += "...\n"
+            message += "Note: If the recipient email does not exist, you may receive a bounce-back notification."
             logger.info(message)
             print(message)
             messagebox.showinfo("Email Sent", message)
